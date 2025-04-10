@@ -1,8 +1,23 @@
 import 'package:flutter/material.dart';
 import 'package:table_calendar/table_calendar.dart';
 import 'package:intl/intl.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'services/todo_service.dart';
+import 'services/calendar_service.dart';
+import 'services/sync_service.dart';
 
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  
+  // Try to load .env but continue even if it fails
+  try {
+    await dotenv.load(fileName: ".env");
+    print("Environment variables loaded successfully");
+  } catch (e) {
+    print('Environment file not found, using default configuration');
+  }
+  
+  // Run the app regardless of whether .env was loaded
   runApp(const PolarisCalendarApp());
 }
 
@@ -266,6 +281,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
 // Sample event data
 class Event {
+  final String id;
   final String title;
   final String description;
   final DateTime start;
@@ -274,8 +290,10 @@ class Event {
   final String location;
   final bool isAllDay;
   final String tag;
+  final int? todoId; // Reference to linked Todo item
 
-  const Event({
+  Event({
+    String? id,
     required this.title,
     this.description = '',
     required this.start,
@@ -284,10 +302,11 @@ class Event {
     this.location = '',
     this.isAllDay = false,
     required this.tag,
-  });
+    this.todoId,
+  }) : id = id ?? DateTime.now().millisecondsSinceEpoch.toString();
 }
 
-// Tag definitions with updated pastel colors
+// Event tag data
 class EventTag {
   final String name;
   final Color color;
@@ -301,198 +320,118 @@ class EventTag {
 
   // Get tag by name
   static EventTag getByName(String name) {
-    return tags.firstWhere(
+    return _eventTags.firstWhere(
       (tag) => tag.name.toLowerCase() == name.toLowerCase(),
-      orElse: () => tags[0],
+      orElse: () => _eventTags.first,
     );
   }
 
-  // Default tags with updated colors from reference images
-  static const List<EventTag> tags = [
-    EventTag(
+  // All available tags
+  static final List<EventTag> _eventTags = [
+    const EventTag(
       name: 'Work',
-      color: Color(0xFF8FB3A9), // Soft bluish green
+      color: Colors.blue,
       icon: Icons.work,
     ),
-    EventTag(
-      name: 'Social',
-      color: Color(0xFFD0ECE7), // Mint green
-      icon: Icons.people,
-    ),
-    EventTag(
-      name: 'Holiday',
-      color: Color(0xFFEFD3D7), // Soft pink
-      icon: Icons.celebration,
-    ),
-    EventTag(
+    const EventTag(
       name: 'Personal',
-      color: Color(0xFFCBC0D3), // Lavender
+      color: Colors.orange,
       icon: Icons.person,
     ),
-    EventTag(
+    const EventTag(
       name: 'Health',
-      color: Color(0xFF8E9AAF), // Dusty blue
-      icon: Icons.favorite,
+      color: Colors.green,
+      icon: Icons.medical_services,
+    ),
+    const EventTag(
+      name: 'Social',
+      color: Colors.purple,
+      icon: Icons.people,
+    ),
+    const EventTag(
+      name: 'Holiday',
+      color: Colors.red,
+      icon: Icons.celebration,
     ),
   ];
+
+  // Get all tags
+  static List<EventTag> getAll() => _eventTags;
 }
 
 // Todo data model
 class Todo {
+  int? id;
   String title;
   String description;
   bool completed;
   String priority;
   DateTime? deadline;
   bool addedToCalendar;
+  String? eventId; // Reference to linked Calendar event
 
   Todo({
+    this.id,
     required this.title,
     this.description = '',
     this.completed = false,
     this.priority = 'normal',
     this.deadline,
     this.addedToCalendar = false,
+    this.eventId,
   });
 }
 
 // Sample events
 final List<Event> sampleEvents = [
   Event(
+    id: '1',
     title: 'Team Meeting',
     description: 'Weekly team sync',
-    start: DateTime.now().copyWith(hour: 14, minute: 0),
-    end: DateTime.now().copyWith(hour: 15, minute: 0),
-    color: EventTag.getByName('Work').color,
-    location: 'Conference Room A',
+    start: DateTime.now().add(const Duration(hours: 1)),
+    end: DateTime.now().add(const Duration(hours: 2)),
+    color: Colors.blue,
     tag: 'Work',
   ),
   Event(
+    id: '2',
     title: 'Doctor Appointment',
     description: 'Annual checkup',
-    start: DateTime.now().add(const Duration(days: 1)).copyWith(hour: 10, minute: 0),
-    end: DateTime.now().add(const Duration(days: 1)).copyWith(hour: 11, minute: 0),
-    color: EventTag.getByName('Health').color,
-    location: 'Downtown Clinic',
+    start: DateTime.now().add(const Duration(days: 1, hours: 10)),
+    end: DateTime.now().add(const Duration(days: 1, hours: 11)),
+    color: Colors.green,
+    location: 'Medical Center',
     tag: 'Health',
   ),
   Event(
+    id: '3',
+    title: 'Birthday Party',
+    description: 'John\'s birthday celebration',
+    start: DateTime.now().add(const Duration(days: 2, hours: 18)),
+    end: DateTime.now().add(const Duration(days: 2, hours: 22)),
+    color: Colors.purple,
+    location: 'Skybar',
+    tag: 'Social',
+  ),
+  // More events
+  Event(
+    id: '4',
     title: 'Project Deadline',
-    description: 'Submit final report',
-    start: DateTime.now().add(const Duration(days: 4)).copyWith(hour: 17, minute: 0),
-    end: DateTime.now().add(const Duration(days: 4)).copyWith(hour: 18, minute: 0),
-    color: EventTag.getByName('Work').color,
+    description: 'Submit final deliverables',
+    start: DateTime.now().add(const Duration(days: 3)),
+    end: DateTime.now().add(const Duration(days: 3, hours: 2)),
+    color: Colors.red,
     tag: 'Work',
   ),
   Event(
-    title: 'Lunch with Sarah',
-    description: 'Discuss new project',
-    start: DateTime.now().add(const Duration(days: 2)).copyWith(hour: 12, minute: 30),
-    end: DateTime.now().add(const Duration(days: 2)).copyWith(hour: 13, minute: 30),
-    color: EventTag.getByName('Social').color,
-    location: 'Cafe Downtown',
-    tag: 'Social',
-  ),
-  Event(
-    title: 'Family Reunion',
-    description: 'Annual family gathering',
-    start: DateTime.now().add(const Duration(days: 7)),
-    end: DateTime.now().add(const Duration(days: 8)),
-    color: EventTag.getByName('Social').color,
-    location: 'City Park',
-    isAllDay: true,
-    tag: 'Social',
-  ),
-  // US Holidays
-  Event(
-    title: 'New Year\'s Day',
-    description: 'Federal Holiday',
-    start: DateTime(DateTime.now().year, 1, 1),
-    end: DateTime(DateTime.now().year, 1, 1),
-    color: EventTag.getByName('Holiday').color,
-    isAllDay: true,
-    tag: 'Holiday',
-  ),
-  Event(
-    title: 'Martin Luther King Jr. Day',
-    description: 'Federal Holiday',
-    start: DateTime(DateTime.now().year, 1, 20), // Third Monday in January (approximation)
-    end: DateTime(DateTime.now().year, 1, 20),
-    color: EventTag.getByName('Holiday').color,
-    isAllDay: true,
-    tag: 'Holiday',
-  ),
-  Event(
-    title: 'Presidents Day',
-    description: 'Federal Holiday',
-    start: DateTime(DateTime.now().year, 2, 17), // Third Monday in February (approximation)
-    end: DateTime(DateTime.now().year, 2, 17),
-    color: EventTag.getByName('Holiday').color,
-    isAllDay: true,
-    tag: 'Holiday',
-  ),
-  Event(
-    title: 'Memorial Day',
-    description: 'Federal Holiday',
-    start: DateTime(DateTime.now().year, 5, 31), // Last Monday in May (approximation)
-    end: DateTime(DateTime.now().year, 5, 31),
-    color: EventTag.getByName('Holiday').color,
-    isAllDay: true,
-    tag: 'Holiday',
-  ),
-  Event(
-    title: 'Independence Day',
-    description: 'Federal Holiday',
-    start: DateTime(DateTime.now().year, 7, 4),
-    end: DateTime(DateTime.now().year, 7, 4),
-    color: EventTag.getByName('Holiday').color,
-    isAllDay: true,
-    tag: 'Holiday',
-  ),
-  Event(
-    title: 'Labor Day',
-    description: 'Federal Holiday',
-    start: DateTime(DateTime.now().year, 9, 5), // First Monday in September (approximation)
-    end: DateTime(DateTime.now().year, 9, 5),
-    color: EventTag.getByName('Holiday').color,
-    isAllDay: true,
-    tag: 'Holiday',
-  ),
-  Event(
-    title: 'Columbus Day',
-    description: 'Federal Holiday',
-    start: DateTime(DateTime.now().year, 10, 14), // Second Monday in October (approximation)
-    end: DateTime(DateTime.now().year, 10, 14),
-    color: EventTag.getByName('Holiday').color,
-    isAllDay: true,
-    tag: 'Holiday',
-  ),
-  Event(
-    title: 'Veterans Day',
-    description: 'Federal Holiday',
-    start: DateTime(DateTime.now().year, 11, 11),
-    end: DateTime(DateTime.now().year, 11, 11),
-    color: EventTag.getByName('Holiday').color,
-    isAllDay: true,
-    tag: 'Holiday',
-  ),
-  Event(
-    title: 'Thanksgiving',
-    description: 'Federal Holiday',
-    start: DateTime(DateTime.now().year, 11, 28), // Fourth Thursday in November (approximation)
-    end: DateTime(DateTime.now().year, 11, 28),
-    color: EventTag.getByName('Holiday').color,
-    isAllDay: true,
-    tag: 'Holiday',
-  ),
-  Event(
-    title: 'Christmas Day',
-    description: 'Federal Holiday',
-    start: DateTime(DateTime.now().year, 12, 25),
-    end: DateTime(DateTime.now().year, 12, 25),
-    color: EventTag.getByName('Holiday').color,
-    isAllDay: true,
-    tag: 'Holiday',
+    id: '5',
+    title: 'Yoga Class',
+    description: 'Weekly yoga session',
+    start: DateTime.now().subtract(const Duration(days: 1, hours: 2)),
+    end: DateTime.now().subtract(const Duration(days: 1, hours: 1)),
+    color: Colors.teal,
+    location: 'Fitness Center',
+    tag: 'Health',
   ),
 ];
 
@@ -508,17 +447,44 @@ class _CalendarScreenState extends State<CalendarScreen> {
   DateTime _focusedDay = DateTime.now();
   DateTime? _selectedDay;
   bool _isMonthView = true;
+  bool _isLoading = true;
   
   // Map to store events by date
   Map<DateTime, List<Event>> _eventsByDay = {};
+  List<Event> _allEvents = [];
   
   @override
   void initState() {
     super.initState();
     _selectedDay = _focusedDay;
-    
-    // Organize sample events by day
-    for (final event in sampleEvents) {
+    _loadEvents();
+  }
+
+  Future<void> _loadEvents() async {
+    try {
+      setState(() {
+        _isLoading = true;
+      });
+      
+      // Load events from service instead of using sample data
+      final events = await CalendarService.getEvents();
+      
+      setState(() {
+        _allEvents = events;
+        _organizeEventsByDay(events);
+        _isLoading = false;
+      });
+    } catch (e) {
+      print('Error loading events: $e');
+      setState(() {
+        _isLoading = false;
+      });
+    }
+  }
+  
+  void _organizeEventsByDay(List<Event> events) {
+    _eventsByDay = {};
+    for (final event in events) {
       final day = DateTime(event.start.year, event.start.month, event.start.day);
       if (_eventsByDay[day] == null) {
         _eventsByDay[day] = [];
@@ -544,6 +510,161 @@ class _CalendarScreenState extends State<CalendarScreen> {
     return allEvents;
   }
 
+  // Add a new event
+  Future<void> _addEvent(Event event) async {
+    try {
+      // Add event to calendar
+      final newEvent = await CalendarService.addEvent(event);
+      
+      // If the event should be linked to a todo
+      if (event.todoId != null) {
+        // Find the todo and update it
+        final todo = await TodoService.findById(event.todoId!);
+        if (todo != null) {
+          await TodoService.updateTodo(todo['id'], {
+            'title': todo['title'],
+            'description': todo['description'],
+            'priority': todo['priority'],
+            'deadline': todo['deadline'],
+            'added_to_calendar': true,
+            'event_id': newEvent.id,
+          });
+        }
+      }
+      
+      // Refresh events
+      await _loadEvents();
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Event added successfully')),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error adding event: $e')),
+      );
+    }
+  }
+
+  // Update an existing event
+  Future<void> _updateEvent(Event event) async {
+    try {
+      // Update event in calendar
+      await CalendarService.updateEvent(event.id, event);
+      
+      // If the event is linked to a todo
+      if (event.todoId != null) {
+        // Find the todo and update it
+        final todo = await TodoService.findById(event.todoId!);
+        if (todo != null) {
+          await TodoService.updateTodo(todo['id'], {
+            'title': event.title,
+            'description': event.description,
+            'deadline': event.start.toIso8601String(),
+            'added_to_calendar': true,
+            'event_id': event.id,
+          });
+        }
+      }
+      
+      // Refresh events
+      await _loadEvents();
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Event updated successfully')),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error updating event: $e')),
+      );
+    }
+  }
+
+  // Delete an event
+  Future<void> _deleteEvent(Event event) async {
+    try {
+      // Delete event from calendar
+      await CalendarService.deleteEvent(event.id);
+      
+      // If the event is linked to a todo
+      if (event.todoId != null) {
+        // Find the todo and update it
+        final todo = await TodoService.findById(event.todoId!);
+        if (todo != null) {
+          await TodoService.updateTodo(todo['id'], {
+            'title': todo['title'],
+            'description': todo['description'],
+            'priority': todo['priority'],
+            'deadline': todo['deadline'],
+            'added_to_calendar': false,
+            'event_id': null,
+          });
+        }
+      }
+      
+      // Refresh events
+      await _loadEvents();
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Event deleted successfully')),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error deleting event: $e')),
+      );
+    }
+  }
+
+  // Create a todo from the event
+  Future<void> _addEventAsTodo(Event event) async {
+    try {
+      // Only proceed if not already a todo
+      if (event.todoId != null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('This event is already in your todo list')),
+        );
+        return;
+      }
+      
+      // Create a todo from the event
+      final todo = SyncService.createTodoFromEvent(event);
+      
+      // Add to todos
+      final newTodo = await TodoService.createTodo({
+        'title': todo.title,
+        'description': todo.description,
+        'priority': todo.priority,
+        'deadline': todo.deadline?.toIso8601String(),
+        'added_to_calendar': true,
+        'event_id': event.id,
+      });
+      
+      // Update the event with the todo ID
+      final updatedEvent = Event(
+        id: event.id,
+        title: event.title,
+        description: event.description,
+        start: event.start,
+        end: event.end,
+        color: event.color,
+        tag: event.tag,
+        location: event.location,
+        isAllDay: event.isAllDay,
+        todoId: newTodo['id'],
+      );
+      
+      await CalendarService.updateEvent(event.id, updatedEvent);
+      await _loadEvents();
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Event added to your todo list')),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error adding event as todo: $e')),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
@@ -559,12 +680,14 @@ class _CalendarScreenState extends State<CalendarScreen> {
           ],
         ),
       ),
-      child: Column(
-        children: [
-          _buildCalendarHeader(),
-          if (_isMonthView) _buildMonthView() else _buildWeekView(),
-        ],
-      ),
+      child: _isLoading
+        ? const Center(child: CircularProgressIndicator())
+        : Column(
+          children: [
+            _buildCalendarHeader(),
+            if (_isMonthView) _buildMonthView() else _buildWeekView(),
+          ],
+        ),
     );
   }
   
@@ -1029,6 +1152,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
                   TextButton.icon(
                     onPressed: () {
                       Navigator.pop(context);
+                      _deleteEvent(event);
                     },
                     icon: const Icon(Icons.delete),
                     label: const Text('Delete'),
@@ -1036,6 +1160,18 @@ class _CalendarScreenState extends State<CalendarScreen> {
                       foregroundColor: Colors.red,
                     ),
                   ),
+                  if (event.todoId == null) // Only show if not already a todo
+                    TextButton.icon(
+                      onPressed: () {
+                        Navigator.pop(context);
+                        _addEventAsTodo(event);
+                      },
+                      icon: const Icon(Icons.add_task),
+                      label: const Text('Add to Todo'),
+                      style: TextButton.styleFrom(
+                        foregroundColor: Colors.green,
+                      ),
+                    ),
                 ],
               ),
             ],
@@ -1063,7 +1199,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
                   const SizedBox(height: 8),
                   Wrap(
                     spacing: 8,
-                    children: EventTag.tags.map((tag) {
+                    children: EventTag.getAll().map((tag) {
                       return ChoiceChip(
                         label: Text(tag.name),
                         selected: selectedTag == tag.name,
@@ -1105,39 +1241,387 @@ class TodoScreen extends StatefulWidget {
 }
 
 class _TodoScreenState extends State<TodoScreen> {
-  final List<Todo> _todos = [
-    Todo(
-      title: 'Buy groceries',
-      description: 'Milk, eggs, bread, and fruits',
-      priority: 'normal',
-      deadline: DateTime.now().add(const Duration(days: 1)),
-    ),
-    Todo(
-      title: 'Prepare presentation',
-      description: 'Quarterly review for the marketing team',
-      priority: 'high',
-      deadline: DateTime.now().add(const Duration(days: 3)),
-    ),
-    Todo(
-      title: 'Call mom',
-      description: 'Ask about the family reunion',
-      completed: true,
-      priority: 'low',
-    ),
-    Todo(
-      title: 'Pay utility bills',
-      description: 'Electric, water, and internet',
-      priority: 'high',
-      deadline: DateTime.now().add(const Duration(days: 2)),
-    ),
-  ];
-
+  List<Todo> _todos = [];
+  bool _isLoading = true;
   String _selectedFilter = 'all';
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadTodos();
+    _syncCalendarToTodos();
+  }
+
+  Future<void> _loadTodos() async {
+    try {
+      setState(() {
+        _isLoading = true;
+        _error = null;
+      });
+      
+      final todos = await TodoService.getTodos();
+      setState(() {
+        _todos = todos.map((todo) => Todo(
+          id: todo['id'],
+          title: todo['title'],
+          description: todo['description'] ?? '',
+          completed: todo['is_completed'],
+          priority: todo['priority'].toString().toLowerCase(),
+          deadline: todo['deadline'] != null ? DateTime.parse(todo['deadline']) : null,
+          addedToCalendar: todo['added_to_calendar'] ?? false,
+          eventId: todo['event_id'],
+        )).toList();
+        _isLoading = false;
+      });
+    } catch (e) {
+      setState(() {
+        _isLoading = false;
+        _error = 'Error loading todos: $e';
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error loading todos: $e')),
+      );
+    }
+  }
+
+  Future<void> _syncCalendarToTodos() async {
+    try {
+      // Get today's events from calendar
+      final events = await CalendarService.getTodayEvents();
+      
+      // For each event, see if it's already in the todo list
+      for (final event in events) {
+        // Skip events that don't have a deadline today
+        final now = DateTime.now();
+        final today = DateTime(now.year, now.month, now.day);
+        final eventDate = DateTime(event.start.year, event.start.month, event.start.day);
+        if (eventDate != today) continue;
+        
+        // Check if we already have this event as a todo
+        final existingTodo = await TodoService.findByEventId(event.id);
+        if (existingTodo != null) continue;
+        
+        // Create a new todo from the event
+        final todo = SyncService.createTodoFromEvent(event);
+        final newTodo = await TodoService.createTodo({
+          'title': todo.title,
+          'description': todo.description,
+          'priority': todo.priority,
+          'deadline': todo.deadline?.toIso8601String(),
+          'added_to_calendar': true,
+          'event_id': event.id,
+        });
+        
+        // Add to local todos list
+        setState(() {
+          _todos.add(Todo(
+            id: newTodo['id'],
+            title: newTodo['title'],
+            description: newTodo['description'],
+            priority: newTodo['priority'],
+            deadline: newTodo['deadline'] != null ? DateTime.parse(newTodo['deadline']) : null,
+            addedToCalendar: true,
+            eventId: newTodo['event_id'],
+          ));
+        });
+      }
+    } catch (e) {
+      print('Error syncing calendar to todos: $e');
+    }
+  }
+
+  Future<void> _createTodo(Todo todo) async {
+    try {
+      final response = await TodoService.createTodo({
+        'title': todo.title,
+        'description': todo.description,
+        'priority': todo.priority,
+        'deadline': todo.deadline?.toIso8601String(),
+        'added_to_calendar': todo.addedToCalendar,
+        'event_id': todo.eventId,
+      });
+      
+      final newTodo = Todo(
+        id: response['id'],
+        title: response['title'],
+        description: response['description'] ?? '',
+        completed: response['is_completed'],
+        priority: response['priority'].toString().toLowerCase(),
+        deadline: response['deadline'] != null ? DateTime.parse(response['deadline']) : null,
+        addedToCalendar: response['added_to_calendar'] ?? false,
+        eventId: response['event_id'],
+      );
+      
+      setState(() {
+        _todos.add(newTodo);
+      });
+      
+      // If marked for calendar, create calendar event
+      if (newTodo.addedToCalendar && newTodo.deadline != null) {
+        await _addTodoToCalendar(newTodo);
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error creating todo: $e')),
+      );
+    }
+  }
+
+  Future<void> _updateTodo(Todo todo) async {
+    try {
+      final response = await TodoService.updateTodo(todo.id!, {
+        'title': todo.title,
+        'description': todo.description,
+        'priority': todo.priority,
+        'deadline': todo.deadline?.toIso8601String(),
+        'added_to_calendar': todo.addedToCalendar,
+        'event_id': todo.eventId,
+      });
+      
+      final updatedTodo = Todo(
+        id: response['id'],
+        title: response['title'],
+        description: response['description'] ?? '',
+        completed: response['is_completed'],
+        priority: response['priority'].toString().toLowerCase(),
+        deadline: response['deadline'] != null ? DateTime.parse(response['deadline']) : null,
+        addedToCalendar: response['added_to_calendar'] ?? false,
+        eventId: response['event_id'],
+      );
+      
+      setState(() {
+        final index = _todos.indexWhere((t) => t.id == todo.id);
+        if (index != -1) {
+          _todos[index] = updatedTodo;
+        }
+      });
+      
+      // Handle calendar sync
+      if (updatedTodo.addedToCalendar && updatedTodo.deadline != null) {
+        if (updatedTodo.eventId != null) {
+          // Update existing calendar event
+          await _updateCalendarEvent(updatedTodo);
+        } else {
+          // Create new calendar event
+          await _addTodoToCalendar(updatedTodo);
+        }
+      } else if (!updatedTodo.addedToCalendar && updatedTodo.eventId != null) {
+        // Remove from calendar if unchecked
+        await _removeFromCalendar(updatedTodo);
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error updating todo: $e')),
+      );
+    }
+  }
+
+  Future<void> _deleteTodo(Todo todo) async {
+    try {
+      await TodoService.deleteTodo(todo.id!);
+      
+      setState(() {
+        _todos.removeWhere((t) => t.id == todo.id);
+      });
+      
+      // If it has a calendar event, remove it
+      if (todo.eventId != null) {
+        await _removeFromCalendar(todo);
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error deleting todo: $e')),
+      );
+    }
+  }
+
+  Future<void> _toggleTodoCompletion(Todo todo) async {
+    try {
+      final response = await TodoService.toggleTodoCompletion(todo.id!);
+      
+      setState(() {
+        final index = _todos.indexWhere((t) => t.id == todo.id);
+        if (index != -1) {
+          _todos[index] = Todo(
+            id: response['id'],
+            title: response['title'],
+            description: response['description'] ?? '',
+            completed: response['is_completed'],
+            priority: response['priority'].toString().toLowerCase(),
+            deadline: response['deadline'] != null ? DateTime.parse(response['deadline']) : null,
+            addedToCalendar: response['added_to_calendar'] ?? false,
+            eventId: response['event_id'],
+          );
+        }
+      });
+      
+      // If this is now complete and has a calendar event, update it
+      if (todo.eventId != null && response['is_completed']) {
+        // You could update the calendar event to show it's completed
+        // This is optional based on your requirements
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error toggling todo completion: $e')),
+      );
+    }
+  }
+  
+  // Add a todo to the calendar
+  Future<void> _addTodoToCalendar(Todo todo) async {
+    try {
+      // Create a calendar event from todo
+      final event = SyncService.createEventFromTodo(todo);
+      
+      // Save to calendar
+      final createdEvent = await CalendarService.addEvent(event);
+      
+      // Update todo with event ID
+      final updatedTodo = await TodoService.updateTodo(todo.id!, {
+        'title': todo.title,
+        'description': todo.description,
+        'priority': todo.priority,
+        'deadline': todo.deadline?.toIso8601String(),
+        'added_to_calendar': true,
+        'event_id': createdEvent.id,
+      });
+      
+      // Update local todo
+      setState(() {
+        final index = _todos.indexWhere((t) => t.id == todo.id);
+        if (index != -1) {
+          _todos[index] = Todo(
+            id: updatedTodo['id'],
+            title: updatedTodo['title'],
+            description: updatedTodo['description'] ?? '',
+            completed: updatedTodo['is_completed'],
+            priority: updatedTodo['priority'].toString().toLowerCase(),
+            deadline: updatedTodo['deadline'] != null ? DateTime.parse(updatedTodo['deadline']) : null,
+            addedToCalendar: true,
+            eventId: updatedTodo['event_id'],
+          );
+        }
+      });
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Task added to calendar')),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error adding to calendar: $e')),
+      );
+    }
+  }
+  
+  // Update a calendar event from a todo
+  Future<void> _updateCalendarEvent(Todo todo) async {
+    try {
+      // Find existing event
+      final existingEvent = await CalendarService.findById(todo.eventId!);
+      if (existingEvent == null) {
+        // Event doesn't exist anymore, create new one
+        await _addTodoToCalendar(todo);
+        return;
+      }
+      
+      // Create updated event
+      final event = Event(
+        id: existingEvent.id,
+        title: todo.title,
+        description: todo.description,
+        start: todo.deadline ?? DateTime.now(),
+        end: (todo.deadline ?? DateTime.now()).add(const Duration(hours: 1)),
+        color: existingEvent.color,
+        tag: existingEvent.tag,
+        location: existingEvent.location,
+        isAllDay: existingEvent.isAllDay,
+        todoId: todo.id,
+      );
+      
+      // Update calendar
+      await CalendarService.updateEvent(event.id, event);
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Calendar event updated')),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error updating calendar event: $e')),
+      );
+    }
+  }
+  
+  // Remove a todo from the calendar
+  Future<void> _removeFromCalendar(Todo todo) async {
+    try {
+      if (todo.eventId != null) {
+        await CalendarService.deleteEvent(todo.eventId!);
+        
+        // Update todo to reflect removal from calendar
+        final updatedTodo = await TodoService.updateTodo(todo.id!, {
+          'title': todo.title,
+          'description': todo.description,
+          'priority': todo.priority,
+          'deadline': todo.deadline?.toIso8601String(),
+          'added_to_calendar': false,
+          'event_id': null,
+        });
+        
+        // Update local todo
+        setState(() {
+          final index = _todos.indexWhere((t) => t.id == todo.id);
+          if (index != -1) {
+            _todos[index] = Todo(
+              id: updatedTodo['id'],
+              title: updatedTodo['title'],
+              description: updatedTodo['description'] ?? '',
+              completed: updatedTodo['is_completed'],
+              priority: updatedTodo['priority'].toString().toLowerCase(),
+              deadline: updatedTodo['deadline'] != null ? DateTime.parse(updatedTodo['deadline']) : null,
+              addedToCalendar: false,
+              eventId: null,
+            );
+          }
+        });
+        
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Removed from calendar')),
+        );
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error removing from calendar: $e')),
+      );
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     
+    if (_error != null) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.error_outline, size: 48, color: Colors.red),
+            const SizedBox(height: 16),
+            Text(
+              _error!,
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontSize: 16),
+            ),
+            const SizedBox(height: 16),
+            ElevatedButton(
+              onPressed: _loadTodos,
+              child: const Text('Retry'),
+            ),
+          ],
+        ),
+      );
+    }
+
     List<Todo> filteredTodos = _todos;
     
     if (_selectedFilter == 'completed') {
@@ -1191,39 +1675,42 @@ class _TodoScreenState extends State<TodoScreen> {
             
             const SizedBox(height: 16),
             Expanded(
-              child: filteredTodos.isEmpty
-                  ? Center(
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(
-                            Icons.check_circle_outline,
-                            size: 64,
-                            color: colorScheme.primary.withOpacity(0.5),
-                          ),
-                          const SizedBox(height: 16),
-                          Text(
-                            'No tasks found',
-                            style: TextStyle(
-                              color: colorScheme.onBackground.withOpacity(0.6),
-                              fontSize: 18,
-                            ),
-                          ),
-                        ],
-                      ),
+              child: _isLoading
+                  ? const Center(
+                      child: CircularProgressIndicator(),
                     )
-                  : ListView.builder(
-                      itemCount: filteredTodos.length,
-                      itemBuilder: (context, index) {
-                        final todo = filteredTodos[index];
-                        return _buildTodoItem(todo);
-                      },
-                    ),
+                  : filteredTodos.isEmpty
+                      ? Center(
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(
+                                Icons.check_circle_outline,
+                                size: 64,
+                                color: colorScheme.primary.withOpacity(0.5),
+                              ),
+                              const SizedBox(height: 16),
+                              Text(
+                                'No tasks found',
+                                style: TextStyle(
+                                  color: colorScheme.onBackground.withOpacity(0.6),
+                                  fontSize: 18,
+                                ),
+                              ),
+                            ],
+                          ),
+                        )
+                      : ListView.builder(
+                          itemCount: filteredTodos.length,
+                          itemBuilder: (context, index) {
+                            final todo = filteredTodos[index];
+                            return _buildTodoItem(todo);
+                          },
+                        ),
             ),
             const SizedBox(height: 16),
             ElevatedButton.icon(
               onPressed: () {
-                // Show dialog to add new task
                 _showAddTaskDialog();
               },
               icon: const Icon(Icons.add),
@@ -1317,9 +1804,7 @@ class _TodoScreenState extends State<TodoScreen> {
               borderRadius: BorderRadius.circular(4),
             ),
             onChanged: (bool? value) {
-              setState(() {
-                todo.completed = value ?? false;
-              });
+              _toggleTodoCompletion(todo);
             },
             activeColor: const Color(0xFF8E9AAF),
           ),
@@ -1410,9 +1895,7 @@ class _TodoScreenState extends State<TodoScreen> {
                   IconButton(
                     icon: const Icon(Icons.delete, size: 20),
                     onPressed: () {
-                      setState(() {
-                        _todos.remove(todo);
-                      });
+                      _deleteTodo(todo);
                     },
                     color: const Color(0xFFEFD3D7),
                   ),
@@ -1423,14 +1906,7 @@ class _TodoScreenState extends State<TodoScreen> {
                       onPressed: () {
                         setState(() {
                           todo.addedToCalendar = true;
-                          
-                          // Here we would add the event to the calendar
-                          // This would require accessing the calendar events list
-                          // which would be better handled through a state management solution
-                          
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('Added to calendar')),
-                          );
+                          _updateTodo(todo);
                         });
                       },
                       style: TextButton.styleFrom(
@@ -1592,32 +2068,19 @@ class _TodoScreenState extends State<TodoScreen> {
                       return;
                     }
                     
+                    final newTodo = Todo(
+                      title: titleController.text,
+                      description: descriptionController.text,
+                      priority: priority,
+                      deadline: selectedDate,
+                      addedToCalendar: addToCalendar,
+                    );
+                    
                     if (isEditing) {
-                      setState(() {
-                        todo.title = titleController.text;
-                        todo.description = descriptionController.text;
-                        todo.priority = priority;
-                        todo.deadline = selectedDate;
-                        todo.addedToCalendar = addToCalendar;
-                      });
+                      newTodo.id = todo!.id;
+                      _updateTodo(newTodo);
                     } else {
-                      final newTodo = Todo(
-                        title: titleController.text,
-                        description: descriptionController.text,
-                        priority: priority,
-                        deadline: selectedDate,
-                        addedToCalendar: addToCalendar,
-                      );
-                      
-                      setState(() {
-                        _todos.add(newTodo);
-                      });
-                      
-                      if (addToCalendar && selectedDate != null) {
-                        // Add to calendar functionality would go here
-                        // This would be better handled with state management
-                        // to access the calendar events list
-                      }
+                      _createTodo(newTodo);
                     }
                     
                     Navigator.pop(context);

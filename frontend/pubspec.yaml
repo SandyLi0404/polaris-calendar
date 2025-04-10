@@ -59,7 +59,7 @@ flutter:
     - assets/animations/
     - assets/icons/
     # Uncomment this line if you add the .env file
-    # - .env
+    - .env
 
   # Temporarily commented out until font files are added
   # fonts:
