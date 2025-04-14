@@ -5,6 +5,8 @@ from datetime import datetime, timedelta
 
 from utils.config import settings
 
+MODEL_NAME = "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo"
+
 async def process_chat_message(message: str, user_id: int, db) -> Tuple[str, Optional[List[Dict[str, Any]]]]:
     """
     Process a chat message using Together AI LLM (Llama 3 model)
@@ -87,7 +89,7 @@ async def process_chat_message(message: str, user_id: int, db) -> Tuple[str, Opt
             print(f"Sending request to Together AI...")
             
             completion = client.chat.completions.create(
-                model="meta-llama/Llama-3.1-8B-Instruct-Turbo",
+                model=MODEL_NAME,
                 messages=[
                     {"role": "system", "content": system_message},
                     {"role": "user", "content": message}
@@ -121,7 +123,7 @@ async def process_chat_message(message: str, user_id: int, db) -> Tuple[str, Opt
                     
                     # Get a user-friendly response with a follow-up call
                     clarification_completion = client.chat.completions.create(
-                        model="meta-llama/Llama-3.1-8B-Instruct-Turbo",
+                        model=MODEL_NAME,
                         messages=[
                             {"role": "system", "content": system_message},
                             {"role": "user", "content": message},
@@ -142,7 +144,7 @@ async def process_chat_message(message: str, user_id: int, db) -> Tuple[str, Opt
                     
                     # Get a user-friendly response with a follow-up call
                     clarification_completion = client.chat.completions.create(
-                        model="meta-llama/Llama-3.1-8B-Instruct-Turbo",
+                        model=MODEL_NAME,
                         messages=[
                             {"role": "system", "content": system_message},
                             {"role": "user", "content": message},

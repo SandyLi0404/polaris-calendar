@@ -7,9 +7,7 @@ import tempfile
 import os
 
 from utils.database import get_db
-from utils.auth import get_current_active_user
 from utils.config import settings
-from models.user import User
 from models.calendar import Event
 from models.todo import TodoItem
 from services.todo_service import create_todo_from_text
@@ -51,17 +49,18 @@ class ConfirmationRequest(BaseModel):
 @router.post("/chat/text", response_model=ChatResponse)
 async def chat_text(
     chat_request: ChatRequest,
-    current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    
     if not settings.TOGETHER_API_KEY:
         raise HTTPException(status_code=500, detail="Together API key is not configured")
+    
+    # Fixed user ID (single user system)
+    user_id = 1
     
     # Process message using Together AI
     response, generated_items = await process_chat_message(
         chat_request.message, 
-        current_user.id,
+        user_id,
         db
     )
     
@@ -73,18 +72,20 @@ async def chat_text(
 @router.post("/confirm-item", response_model=dict)
 async def confirm_item(
     confirmation: ConfirmationRequest,
-    current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
     if not confirmation.confirmed:
         return {"message": "Item creation cancelled"}
     
+    # Fixed user ID (single user system)
+    user_id = 1
+    
     try:
         if confirmation.item_type == "todo":
-            todo_item = create_todo_from_text(confirmation.item_data, current_user.id, db)
+            todo_item = create_todo_from_text(confirmation.item_data, user_id, db)
             return {"message": "Todo item created successfully", "item_id": todo_item.id}
         elif confirmation.item_type == "event":
-            event = create_event_from_text(confirmation.item_data, current_user.id, db)
+            event = create_event_from_text(confirmation.item_data, user_id, db)
             return {"message": "Event created successfully", "item_id": event.id}
         else:
             raise HTTPException(status_code=400, detail="Invalid item type")
@@ -93,29 +94,26 @@ async def confirm_item(
 
 @router.get("/daily-summary", response_model=dict)
 async def get_daily_summary(
-    current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
+    # Fixed user ID (single user system)
+    user_id = 1
+    
     # Create a simple text-based summary
     # Get today's date
     today = datetime.now().date()
     tomorrow = today + timedelta(days=1)
     
-    # Get user
-    user = db.query(User).filter(User.id == current_user.id).first()
-    if not user:
-        return {"summary": "User not found"}
-    
     # Get today's events
     events = db.query(Event).filter(
-        Event.user_id == current_user.id,
+        Event.user_id == user_id,
         Event.start_time >= today,
         Event.start_time < tomorrow
     ).order_by(Event.start_time).all()
     
     # Get incomplete todo items
     todo_items = db.query(TodoItem).filter(
-        TodoItem.user_id == current_user.id,
+        TodoItem.user_id == user_id,
         TodoItem.is_completed == False
     ).order_by(TodoItem.deadline).all()
     
