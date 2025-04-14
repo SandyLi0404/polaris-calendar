@@ -5,6 +5,10 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'services/todo_service.dart';
 import 'services/calendar_service.dart';
 import 'services/sync_service.dart';
+import 'services/api_service.dart';
+import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:convert';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -2276,36 +2280,291 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
-  void _sendMessage() {
+  void _sendMessage() async {
     if (_messageController.text.trim().isNotEmpty) {
+      final userMessage = _messageController.text;
       final now = DateTime.now();
       final time = '${now.hour}:${now.minute.toString().padLeft(2, '0')}';
       
       setState(() {
         _messages.add({
-          'text': _messageController.text,
+          'text': userMessage,
           'isUser': true,
           'time': time,
-        });
-        
-        // Add a simulated response
-        Future.delayed(const Duration(seconds: 1), () {
-          setState(() {
-            _messages.add({
-              'text': 'Thanks for your message! This is a placeholder response.',
-              'isUser': false,
-              'time': time,
-            });
-          });
         });
       });
       
       _messageController.clear();
+      
+      try {
+        // Check if user is logged in
+        final isLoggedIn = await ApiService.isLoggedIn();
+        if (!isLoggedIn) {
+          setState(() {
+            _messages.add({
+              'text': 'You need to log in to use the chat feature',
+              'isUser': false,
+              'time': time,
+              'isError': true,
+            });
+          });
+          return;
+        }
+        
+        // Display typing indicator
+        setState(() {
+          _messages.add({
+            'text': 'Typing...',
+            'isUser': false,
+            'time': time,
+            'isTyping': true,
+          });
+        });
+        
+        // Test authentication with backend
+        final authOk = await ApiService.testAuth();
+        if (!authOk) {
+          setState(() {
+            _messages.removeWhere((message) => message['isTyping'] == true);
+            _messages.add({
+              'text': 'Authentication failed. Please log in again.',
+              'isUser': false,
+              'time': time,
+              'isError': true,
+            });
+          });
+          return;
+        }
+        
+        // Send message to API
+        final response = await ApiService.sendChatMessage(userMessage);
+        
+        // Remove typing indicator and add actual response
+        setState(() {
+          _messages.removeWhere((message) => message['isTyping'] == true);
+        });
+        
+        // Check if there was an error
+        if (response.containsKey('error')) {
+          setState(() {
+            _messages.add({
+              'text': response['response'],
+              'isUser': false,
+              'time': time,
+              'isError': true,
+            });
+          });
+          
+          // Show auth error dialog if needed
+          if (response['error'] == 'Authentication failed') {
+            _showAuthErrorDialog();
+          }
+          return;
+        }
+        
+        // Handle successful response
+        setState(() {
+          _messages.add({
+            'text': response['response'],
+            'isUser': false,
+            'time': time,
+            'generatedItems': response['generated_items'],
+          });
+        });
+        
+        // If there are generated items (calendar events or todos), handle them
+        if (response['generated_items'] != null && response['generated_items'].isNotEmpty) {
+          _handleGeneratedItems(response['generated_items']);
+        }
+      } catch (error) {
+        // Format a more user-friendly error message
+        String errorMessage = 'Sorry, I encountered an error';
+        
+        if (error.toString().contains('401')) {
+          errorMessage += ': Authentication failed. Please log in again.';
+          // Show auth error dialog
+          _showAuthErrorDialog();
+        } else if (error.toString().contains('Failed to send message')) {
+          errorMessage += ': Could not connect to the AI service. Please check your internet connection or try again later.';
+        } else {
+          errorMessage += ': ${error.toString()}';
+        }
+        
+        setState(() {
+          _messages.removeWhere((message) => message['isTyping'] == true);
+          _messages.add({
+            'text': errorMessage,
+            'isUser': false,
+            'time': time,
+            'isError': true,
+          });
+        });
+        
+        // Show snackbar with action to retry
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error connecting to AI service'),
+            action: SnackBarAction(
+              label: 'Retry',
+              onPressed: () {
+                // Retry the message
+                _retryLastMessage();
+              },
+            ),
+          ),
+        );
+      }
+    }
+  }
+  
+  void _showAuthErrorDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Authentication Error'),
+        content: const Text('Your session has expired. Please log in again to continue using the chat.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
+  }
+  
+  void _retryLastMessage() {
+    // Find the last user message
+    final lastUserMessage = _messages.lastWhere(
+      (message) => message['isUser'] == true, 
+      orElse: () => <String, dynamic>{'isUser': false}
+    );
+    
+    if (lastUserMessage['isUser'] == true) {
+      // Re-send this message
+      _messageController.text = lastUserMessage['text'];
+      _sendMessage();
+    }
+  }
+
+  void _handleGeneratedItems(List<dynamic> items) {
+    for (var item in items) {
+      if (item['type'] == 'todo') {
+        _showTodoConfirmation(item['data']);
+      } else if (item['type'] == 'event') {
+        _showEventConfirmation(item['data']);
+      }
+    }
+  }
+  
+  void _showTodoConfirmation(Map<String, dynamic> todoData) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Add Todo Item?'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Title: ${todoData['title']}'),
+            if (todoData['description'] != null) 
+              Text('Description: ${todoData['description']}'),
+            if (todoData['deadline'] != null) 
+              Text('Deadline: ${todoData['deadline']}'),
+            if (todoData['priority'] != null) 
+              Text('Priority: ${todoData['priority']}'),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _confirmItem('todo', todoData);
+            },
+            child: const Text('Add'),
+          ),
+        ],
+      ),
+    );
+  }
+  
+  void _showEventConfirmation(Map<String, dynamic> eventData) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Add Calendar Event?'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Title: ${eventData['title']}'),
+            if (eventData['description'] != null) 
+              Text('Description: ${eventData['description']}'),
+            if (eventData['start_time'] != null) 
+              Text('Start: ${eventData['start_time']}'),
+            if (eventData['end_time'] != null) 
+              Text('End: ${eventData['end_time']}'),
+            if (eventData['location'] != null) 
+              Text('Location: ${eventData['location']}'),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _confirmItem('event', eventData);
+            },
+            child: const Text('Add'),
+          ),
+        ],
+      ),
+    );
+  }
+  
+  Future<void> _confirmItem(String type, Map<String, dynamic> data) async {
+    try {
+      final payload = {
+        'item_type': type,
+        'item_data': data,
+        'confirmed': true,
+      };
+      
+      final token = await SharedPreferences.getInstance().then((prefs) => prefs.getString('token'));
+      final response = await http.post(
+        Uri.parse('http://localhost:8000/api/chatbot/confirm-item'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+        body: jsonEncode(payload),
+      );
+      
+      if (response.statusCode == 200) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('${type == 'todo' ? 'Todo' : 'Event'} added successfully')),
+        );
+      } else {
+        throw Exception('Failed to confirm item: ${response.statusCode}');
+      }
+    } catch (error) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error: $error')),
+      );
     }
   }
 
   Widget _buildMessageBubble(String text, bool isUser, String time) {
     final colorScheme = Theme.of(context).colorScheme;
+    final isError = _messages.any((m) => 
+      m['text'] == text && m['isUser'] == isUser && m['time'] == time && m['isError'] == true);
     
     return Align(
       alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
@@ -2315,7 +2574,9 @@ class _ChatScreenState extends State<ChatScreen> {
         decoration: BoxDecoration(
           color: isUser 
               ? colorScheme.primary
-              : colorScheme.secondaryContainer,
+              : isError 
+                  ? Colors.red.shade100
+                  : colorScheme.secondaryContainer,
           borderRadius: BorderRadius.circular(16),
         ),
         constraints: BoxConstraints(
@@ -2329,14 +2590,20 @@ class _ChatScreenState extends State<ChatScreen> {
               style: TextStyle(
                 color: isUser 
                     ? colorScheme.onPrimary
-                    : colorScheme.onSecondary,
+                    : isError
+                        ? Colors.red.shade900
+                        : colorScheme.onSecondary,
               ),
             ),
             const SizedBox(height: 4),
             Text(
               time,
               style: TextStyle(
-                color: (isUser ? colorScheme.onPrimary : colorScheme.onSecondary)
+                color: (isUser 
+                    ? colorScheme.onPrimary 
+                    : isError
+                        ? Colors.red.shade900
+                        : colorScheme.onSecondary)
                     .withOpacity(0.6),
                 fontSize: 12,
               ),
