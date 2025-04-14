@@ -61,10 +61,13 @@ class SortOrder(str, Enum):
 async def get_todo_items(
     completed: Optional[bool] = Query(None),
     sort_by: Optional[SortOrder] = Query(SortOrder.CREATED),
-    current_user: User = Depends(get_current_active_user),
+    current_user: Optional[User] = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    query = db.query(TodoItem).filter(TodoItem.user_id == current_user.id)
+    # For development, if user is not authenticated, use a fixed user ID
+    user_id = current_user.id if current_user else 1
+    
+    query = db.query(TodoItem).filter(TodoItem.user_id == user_id)
     
     # Filter by completion status
     if completed is not None:
@@ -86,16 +89,19 @@ async def get_todo_items(
 
 @router.get("/items/today", response_model=List[TodoItemResponse])
 async def get_today_todo_items(
-    current_user: User = Depends(get_current_active_user),
+    current_user: Optional[User] = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
+    # For development, if user is not authenticated, use a fixed user ID
+    user_id = current_user.id if current_user else 1
+    
     # Get today's date (without time)
     today = datetime.now().date()
     tomorrow = today + timedelta(days=1)
     
     # Query items with deadline today or no deadline but created today
     query = db.query(TodoItem).filter(
-        TodoItem.user_id == current_user.id,
+        TodoItem.user_id == user_id,
         (
             (TodoItem.deadline >= today) & 
             (TodoItem.deadline < tomorrow)
@@ -112,12 +118,15 @@ async def get_today_todo_items(
 @router.get("/items/{todo_id}", response_model=TodoItemResponse)
 async def get_todo_item(
     todo_id: int,
-    current_user: User = Depends(get_current_active_user),
+    current_user: Optional[User] = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
+    # For development, if user is not authenticated, use a fixed user ID
+    user_id = current_user.id if current_user else 1
+    
     todo_item = db.query(TodoItem).filter(
         TodoItem.id == todo_id,
-        TodoItem.user_id == current_user.id
+        TodoItem.user_id == user_id
     ).first()
     
     if not todo_item:
@@ -128,16 +137,19 @@ async def get_todo_item(
 @router.post("/items", response_model=TodoItemResponse)
 async def create_todo_item(
     todo_item: TodoItemCreate,
-    current_user: User = Depends(get_current_active_user),
+    current_user: Optional[User] = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
+    # For development, if user is not authenticated, use a fixed user ID
+    user_id = current_user.id if current_user else 1
+    
     # Create new todo item
     db_todo_item = TodoItem(
         title=todo_item.title,
         description=todo_item.description,
         deadline=todo_item.deadline,
         priority=todo_item.priority,
-        user_id=current_user.id
+        user_id=user_id
     )
     
     db.add(db_todo_item)
@@ -161,13 +173,16 @@ async def create_todo_item(
 async def update_todo_item(
     todo_id: int,
     todo_data: TodoItemCreate,
-    current_user: User = Depends(get_current_active_user),
+    current_user: Optional[User] = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
+    # For development, if user is not authenticated, use a fixed user ID
+    user_id = current_user.id if current_user else 1
+    
     # Get todo item
     todo_item = db.query(TodoItem).filter(
         TodoItem.id == todo_id,
-        TodoItem.user_id == current_user.id
+        TodoItem.user_id == user_id
     ).first()
     
     if not todo_item:
@@ -199,13 +214,16 @@ async def update_todo_item(
 @router.patch("/items/{todo_id}/toggle", response_model=TodoItemResponse)
 async def toggle_todo_completion(
     todo_id: int,
-    current_user: User = Depends(get_current_active_user),
+    current_user: Optional[User] = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
+    # For development, if user is not authenticated, use a fixed user ID
+    user_id = current_user.id if current_user else 1
+    
     # Get todo item
     todo_item = db.query(TodoItem).filter(
         TodoItem.id == todo_id,
-        TodoItem.user_id == current_user.id
+        TodoItem.user_id == user_id
     ).first()
     
     if not todo_item:
@@ -222,13 +240,16 @@ async def toggle_todo_completion(
 @router.delete("/items/{todo_id}", response_model=dict)
 async def delete_todo_item(
     todo_id: int,
-    current_user: User = Depends(get_current_active_user),
+    current_user: Optional[User] = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
+    # For development, if user is not authenticated, use a fixed user ID
+    user_id = current_user.id if current_user else 1
+    
     # Get todo item
     todo_item = db.query(TodoItem).filter(
         TodoItem.id == todo_id,
-        TodoItem.user_id == current_user.id
+        TodoItem.user_id == user_id
     ).first()
     
     if not todo_item:
