@@ -65,7 +65,8 @@ polaris-calendar/
    ```
 4. Run the backend server:
    ```
-   python backend/main.py
+   cd backend
+   uvicorn main:app --reload --host 0.0.0.0 --port 8000
    ```
 
 ### Frontend Setup
@@ -77,7 +78,7 @@ polaris-calendar/
    ```
 3. Run the application:
    ```
-   flutter run
+   flutter run -d
    ```
 
 ## Contributing
