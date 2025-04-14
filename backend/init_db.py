@@ -1,18 +1,33 @@
+import os
+import sys
 from sqlalchemy import create_engine
+from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from models.user import User
 from models.calendar import Event, Tag, Reminder
 from models.todo import TodoItem, TodoReminder, PriorityLevel
-from utils.database import Base, get_db
+from utils.database import Base, get_db, engine
 from utils.auth import get_password_hash
 from datetime import datetime, timedelta
 import uuid
 
+# Add the backend directory to the path so we can import our modules
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+
 # Create tables
 def init_db():
-    from utils.database import SQLALCHEMY_DATABASE_URL, engine
+    from utils.database import engine
+    
+    print("Creating database tables...")
+    
+    # Drop all tables first
+    if "--recreate" in sys.argv:
+        print("Recreating all tables (data will be lost)...")
+        Base.metadata.drop_all(bind=engine)
+    
+    # Create all tables
     Base.metadata.create_all(bind=engine)
-    print("Database tables created.")
+    print("Database tables created successfully!")
 
 # Create sample data
 def create_sample_data():

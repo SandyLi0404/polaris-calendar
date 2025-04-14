@@ -33,14 +33,23 @@ def create_todo_from_text(todo_data: Dict[str, Any], user_id: int, db) -> TodoIt
     priority_str = todo_data.get("priority", "low").lower()
     priority = PriorityLevel.HIGH if priority_str == "high" else PriorityLevel.LOW
     
+    # Get calendar integration fields
+    added_to_calendar = todo_data.get("added_to_calendar", False)
+    event_id = todo_data.get("event_id")
+    
     # Create todo item
     todo_item = TodoItem(
         title=title,
         description=description,
         deadline=deadline,
         priority=priority,
-        user_id=user_id
+        user_id=user_id,
+        added_to_calendar=added_to_calendar,
+        event_id=event_id
     )
+    
+    # Log the creation
+    print(f"Creating todo item: {title} with deadline: {deadline}, priority: {priority_str}")
     
     db.add(todo_item)
     db.commit()

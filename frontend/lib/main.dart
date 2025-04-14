@@ -9,6 +9,97 @@ import 'services/api_service.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
+import 'package:provider/provider.dart';
+
+// Add ChatProvider after TabNavigationNotifier
+class ChatProvider extends ChangeNotifier {
+  List<Map<String, dynamic>> _messages = [
+    {
+      'text': 'Hello! How can I help you today?',
+      'isUser': false,
+      'time': '10:00 AM',
+    },
+  ];
+  
+  bool _initialized = false;
+  
+  ChatProvider() {
+    _loadMessages();
+  }
+  
+  List<Map<String, dynamic>> get messages => _messages;
+  bool get isInitialized => _initialized;
+  
+  Future<void> _loadMessages() async {
+    if (_initialized) return;
+    
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final messagesJson = prefs.getString('chat_messages');
+      
+      if (messagesJson != null) {
+        final List<dynamic> decoded = jsonDecode(messagesJson);
+        _messages = decoded.map((item) => Map<String, dynamic>.from(item)).toList();
+        
+        // If loading empty or invalid data, set default message
+        if (_messages.isEmpty) {
+          _messages = [
+            {
+              'text': 'Hello! How can I help you today?',
+              'isUser': false,
+              'time': _getCurrentTime(),
+            },
+          ];
+        }
+      }
+      
+      _initialized = true;
+      notifyListeners();
+    } catch (e) {
+      print('Error loading chat messages: $e');
+      // Keep default messages if there's an error
+    }
+  }
+  
+  Future<void> _saveMessages() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final messagesJson = jsonEncode(_messages);
+      await prefs.setString('chat_messages', messagesJson);
+    } catch (e) {
+      print('Error saving chat messages: $e');
+    }
+  }
+  
+  void addMessage(Map<String, dynamic> message) {
+    _messages.add(message);
+    notifyListeners();
+    _saveMessages();
+  }
+  
+  void clearMessages() {
+    _messages.clear();
+    String currentTime = _getCurrentTime();
+    _messages.add({
+      'text': 'Chat history cleared. How can I help you today?',
+      'isUser': false,
+      'time': currentTime,
+    });
+    notifyListeners();
+    _saveMessages();
+  }
+  
+  void removeTypingIndicator() {
+    _messages.removeWhere((message) => message['isTyping'] == true);
+    notifyListeners();
+    _saveMessages();
+  }
+  
+  String _getCurrentTime() {
+    final now = DateTime.now();
+    return '${now.hour}:${now.minute.toString().padLeft(2, '0')}';
+  }
+}
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -22,7 +113,27 @@ void main() async {
   }
   
   // Run the app regardless of whether .env was loaded
-  runApp(const PolarisCalendarApp());
+  runApp(
+    MultiProvider(
+      providers: [
+        ChangeNotifierProvider(create: (context) => TabNavigationNotifier()),
+        ChangeNotifierProvider(create: (context) => ChatProvider()),
+      ],
+      child: const PolarisCalendarApp(),
+    ),
+  );
+}
+
+// Add TabNavigationNotifier class
+class TabNavigationNotifier extends ChangeNotifier {
+  int _currentIndex = 0;
+  
+  int get currentIndex => _currentIndex;
+  
+  void setCurrentIndex(int index) {
+    _currentIndex = index;
+    notifyListeners();
+  }
 }
 
 // App color themes based on reference images
@@ -146,6 +257,36 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
+  late final TabNavigationNotifier _tabNavigationNotifier;
+  
+  @override
+  void initState() {
+    super.initState();
+    // Access the provider after the widget is built
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _tabNavigationNotifier = Provider.of<TabNavigationNotifier>(context, listen: false);
+      _tabNavigationNotifier.addListener(_onTabChanged);
+    });
+  }
+  
+  @override
+  void dispose() {
+    // Remove listener when widget is disposed
+    if (mounted) {
+      Provider.of<TabNavigationNotifier>(context, listen: false).removeListener(_onTabChanged);
+    }
+    super.dispose();
+  }
+  
+  void _onTabChanged() {
+    if (mounted) {
+      final currentIndex = Provider.of<TabNavigationNotifier>(context, listen: false).currentIndex;
+      setState(() {
+        _selectedIndex = currentIndex;
+      });
+    }
+  }
+
   int _selectedIndex = 0;
 
   static final List<Widget> _widgetOptions = <Widget>[
@@ -155,9 +296,7 @@ class _HomeScreenState extends State<HomeScreen> {
   ];
 
   void _onItemTapped(int index) {
-    setState(() {
-      _selectedIndex = index;
-    });
+    Provider.of<TabNavigationNotifier>(context, listen: false).setCurrentIndex(index);
   }
 
   // Get theme colors based on selected tab
@@ -2181,17 +2320,12 @@ class ChatScreen extends StatefulWidget {
 
 class _ChatScreenState extends State<ChatScreen> {
   final TextEditingController _messageController = TextEditingController();
-  final List<Map<String, dynamic>> _messages = [
-    {
-      'text': 'Hello! How can I help you today?',
-      'isUser': false,
-      'time': '10:00 AM',
-    },
-  ];
+  bool _isClearing = false;
 
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final chatProvider = Provider.of<ChatProvider>(context);
     
     return Container(
       decoration: BoxDecoration(
@@ -2206,20 +2340,55 @@ class _ChatScreenState extends State<ChatScreen> {
       ),
       child: Column(
         children: [
-          Expanded(
-            child: ListView.builder(
-              padding: const EdgeInsets.all(16),
-              itemCount: _messages.length,
-              itemBuilder: (context, index) {
-                final message = _messages[index];
-                return _buildMessageBubble(
-                  message['text'],
-                  message['isUser'],
-                  message['time'],
-                );
-              },
+          // Chat header with clear button
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text('Chat with AI Assistant', 
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 16,
+                  ),
+                ),
+                TextButton.icon(
+                  icon: _isClearing 
+                    ? const SizedBox(
+                        width: 16, 
+                        height: 16, 
+                        child: CircularProgressIndicator(strokeWidth: 2)
+                      )
+                    : const Icon(Icons.refresh),
+                  label: const Text('Clear Chat'),
+                  onPressed: _isClearing ? null : _clearChat,
+                  style: TextButton.styleFrom(
+                    foregroundColor: colorScheme.primary,
+                  ),
+                ),
+              ],
             ),
           ),
+          
+          // Chat messages
+          Expanded(
+            child: !chatProvider.isInitialized
+              ? const Center(child: CircularProgressIndicator())
+              : ListView.builder(
+                  padding: const EdgeInsets.all(16),
+                  itemCount: chatProvider.messages.length,
+                  itemBuilder: (context, index) {
+                    final message = chatProvider.messages[index];
+                    return _buildMessageBubble(
+                      message['text'],
+                      message['isUser'],
+                      message['time'],
+                    );
+                  },
+                ),
+          ),
+          
+          // Message input
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             decoration: BoxDecoration(
@@ -2263,6 +2432,7 @@ class _ChatScreenState extends State<ChatScreen> {
                       fillColor: colorScheme.primaryContainer.withOpacity(0.3),
                       contentPadding: const EdgeInsets.symmetric(horizontal: 16),
                     ),
+                    onSubmitted: (_) => _sendMessage(),
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -2279,51 +2449,48 @@ class _ChatScreenState extends State<ChatScreen> {
       ),
     );
   }
-
+  
   void _sendMessage() async {
     if (_messageController.text.trim().isNotEmpty) {
       final userMessage = _messageController.text;
-      final now = DateTime.now();
-      final time = '${now.hour}:${now.minute.toString().padLeft(2, '0')}';
+      final time = _getCurrentTime();
+      final chatProvider = Provider.of<ChatProvider>(context, listen: false);
       
-      setState(() {
-        _messages.add({
-          'text': userMessage,
-          'isUser': true,
-          'time': time,
-        });
+      // Add user message
+      chatProvider.addMessage({
+        'text': userMessage,
+        'isUser': true,
+        'time': time,
       });
       
       _messageController.clear();
       
       try {
         // Display typing indicator
-        setState(() {
-          _messages.add({
-            'text': 'Typing...',
-            'isUser': false,
-            'time': time,
-            'isTyping': true,
-          });
+        chatProvider.addMessage({
+          'text': 'Typing...',
+          'isUser': false,
+          'time': time,
+          'isTyping': true,
         });
         
         // Send message to API
         final response = await ApiService.sendChatMessage(userMessage);
         
         // Remove typing indicator and add actual response
-        setState(() {
-          _messages.removeWhere((message) => message['isTyping'] == true);
-          _messages.add({
-            'text': response['response'],
-            'isUser': false,
-            'time': time,
-            'generatedItems': response['generated_items'],
-          });
+        chatProvider.removeTypingIndicator();
+        chatProvider.addMessage({
+          'text': response['response'],
+          'isUser': false,
+          'time': time,
+          'createdItems': response['created_items'],
         });
         
-        // If there are generated items (calendar events or todos), handle them
-        if (response['generated_items'] != null && response['generated_items'].isNotEmpty) {
-          _handleGeneratedItems(response['generated_items']);
+        // If items were created, display a notification
+        if (response['created_items'] != null && 
+            response['created_items'] is List && 
+            response['created_items'].isNotEmpty) {
+          _showCreatedItemsNotification(response['created_items']);
         }
       } catch (error) {
         // Format a more user-friendly error message
@@ -2337,13 +2504,11 @@ class _ChatScreenState extends State<ChatScreen> {
           errorMessage += ': ${error.toString()}';
         }
         
-        setState(() {
-          _messages.removeWhere((message) => message['isTyping'] == true);
-          _messages.add({
-            'text': errorMessage,
-            'isUser': false,
-            'time': time,
-          });
+        chatProvider.removeTypingIndicator();
+        chatProvider.addMessage({
+          'text': errorMessage,
+          'isUser': false,
+          'time': time,
         });
         
         // Show snackbar with action to retry
@@ -2364,8 +2529,9 @@ class _ChatScreenState extends State<ChatScreen> {
   }
   
   void _retryLastMessage() {
+    final chatProvider = Provider.of<ChatProvider>(context, listen: false);
     // Find the last user message
-    final lastUserMessage = _messages.lastWhere(
+    final lastUserMessage = chatProvider.messages.lastWhere(
       (message) => message['isUser'] == true, 
       orElse: () => <String, dynamic>{'isUser': false}
     );
@@ -2377,118 +2543,71 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
   
-  void _handleGeneratedItems(List<dynamic> items) {
-    for (var item in items) {
-      if (item['type'] == 'todo') {
-        _showTodoConfirmation(item['data']);
-      } else if (item['type'] == 'event') {
-        _showEventConfirmation(item['data']);
-      }
-    }
-  }
-  
-  void _showTodoConfirmation(Map<String, dynamic> todoData) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Add Todo Item?'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('Title: ${todoData['title']}'),
-            if (todoData['description'] != null) 
-              Text('Description: ${todoData['description']}'),
-            if (todoData['deadline'] != null) 
-              Text('Deadline: ${todoData['deadline']}'),
-            if (todoData['priority'] != null) 
-              Text('Priority: ${todoData['priority']}'),
-          ],
+  void _showCreatedItemsNotification(List<dynamic> items) {
+    // Validate that we have actual items with required fields
+    if (items.isEmpty) return;
+    
+    // Filter out any invalid items
+    final validItems = items.where((item) => 
+      item != null && 
+      item is Map<String, dynamic> && 
+      item.containsKey('type') && 
+      item.containsKey('id') && 
+      item.containsKey('title')
+    ).toList();
+    
+    if (validItems.isEmpty) return;
+    
+    final itemDescriptions = validItems.map((item) {
+      final itemType = item['type'] == 'todo' ? 'Task' : 'Event';
+      return '$itemType: ${item['title']}';
+    }).join('\n');
+    
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Created ${validItems.length} item(s):\n$itemDescriptions'),
+        duration: const Duration(seconds: 5),
+        action: SnackBarAction(
+          label: 'View',
+          onPressed: () {
+            // Navigate to the appropriate tab to view the items
+            final tabIndex = validItems[0]['type'] == 'todo' ? 1 : 0; // 1 for Todo, 0 for Calendar
+            Provider.of<TabNavigationNotifier>(context, listen: false).setCurrentIndex(tabIndex);
+          },
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () {
-              Navigator.pop(context);
-              _confirmItem('todo', todoData);
-            },
-            child: const Text('Add'),
-          ),
-        ],
       ),
     );
   }
-  
-  void _showEventConfirmation(Map<String, dynamic> eventData) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Add Calendar Event?'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('Title: ${eventData['title']}'),
-            if (eventData['description'] != null) 
-              Text('Description: ${eventData['description']}'),
-            if (eventData['start_time'] != null) 
-              Text('Start: ${eventData['start_time']}'),
-            if (eventData['end_time'] != null) 
-              Text('End: ${eventData['end_time']}'),
-            if (eventData['location'] != null) 
-              Text('Location: ${eventData['location']}'),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () {
-              Navigator.pop(context);
-              _confirmItem('event', eventData);
-            },
-            child: const Text('Add'),
-          ),
-        ],
-      ),
-    );
-  }
-  
-  Future<void> _confirmItem(String type, Map<String, dynamic> data) async {
+
+  Future<void> _clearChat() async {
+    final chatProvider = Provider.of<ChatProvider>(context, listen: false);
+    
     try {
-      final payload = {
-        'item_type': type,
-        'item_data': data,
-        'confirmed': true,
-      };
+      setState(() {
+        _isClearing = true;
+      });
       
-      final token = await SharedPreferences.getInstance().then((prefs) => prefs.getString('token'));
-      final response = await http.post(
-        Uri.parse('http://localhost:8000/api/chatbot/confirm-item'),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $token',
-        },
-        body: jsonEncode(payload),
-      );
+      await ApiService.clearChatHistory();
       
-      if (response.statusCode == 200) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('${type == 'todo' ? 'Todo' : 'Event'} added successfully')),
-        );
-      } else {
-        throw Exception('Failed to confirm item: ${response.statusCode}');
-      }
-    } catch (error) {
+      chatProvider.clearMessages();
+      
+      setState(() {
+        _isClearing = false;
+      });
+    } catch (e) {
+      setState(() {
+        _isClearing = false;
+      });
+      
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error: $error')),
+        SnackBar(content: Text('Error clearing chat history: $e')),
       );
     }
+  }
+  
+  String _getCurrentTime() {
+    final now = DateTime.now();
+    return '${now.hour}:${now.minute.toString().padLeft(2, '0')}';
   }
 
   Widget _buildMessageBubble(String text, bool isUser, String time) {

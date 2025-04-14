@@ -21,6 +21,10 @@ class TodoItem(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
+    # Add fields for calendar integration
+    added_to_calendar = Column(Boolean, default=False)
+    event_id = Column(String, nullable=True)
+    
     # Relationship with User
     user_id = Column(Integer, ForeignKey("users.id"))
     user = relationship("User", back_populates="todo_items")

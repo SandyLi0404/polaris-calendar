@@ -5,9 +5,14 @@ from datetime import datetime, timedelta
 
 from utils.config import settings
 
-MODEL_NAME = "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo"
+MODEL_NAME = "meta-llama/Llama-3.3-70B-Instruct-Turbo"
 
-async def process_chat_message(message: str, user_id: int, db) -> Tuple[str, Optional[List[Dict[str, Any]]]]:
+async def process_chat_message(
+    message: str, 
+    user_id: int, 
+    db, 
+    conversation_history: Optional[List[Dict[str, str]]] = None
+) -> Tuple[str, Optional[List[Dict[str, Any]]]]:
     """
     Process a chat message using Together AI LLM (Llama 3 model)
     
@@ -15,6 +20,7 @@ async def process_chat_message(message: str, user_id: int, db) -> Tuple[str, Opt
         message: The user's message
         user_id: The ID of the user
         db: Database session
+        conversation_history: List of previous messages in the conversation
         
     Returns:
         Tuple containing (chatbot response, list of generated items)
@@ -38,6 +44,7 @@ async def process_chat_message(message: str, user_id: int, db) -> Tuple[str, Opt
         1. A task or todo item - Extract it and format it as a todo item
         2. An event or meeting - Extract it and format it as a calendar event
         
+        Remember previous messages in the conversation when responding.
         Respond conversationally and be helpful.
         """
         
@@ -88,12 +95,30 @@ async def process_chat_message(message: str, user_id: int, db) -> Tuple[str, Opt
         try:
             print(f"Sending request to Together AI...")
             
+            # Prepare messages list
+            messages = [{"role": "system", "content": system_message}]
+            
+            # Include conversation history if provided
+            if conversation_history and len(conversation_history) > 0:
+                # Use conversation history but limit to last 10 exchanges
+                # Skip adding the current message since it will be added below
+                history = conversation_history[:-1] if len(conversation_history) > 0 and conversation_history[-1]["role"] == "user" else conversation_history
+                # Take only the last 10 messages to avoid context window limits
+                messages.extend(history[-10:])
+            else:
+                # If no history, just add the current user message
+                messages.append({"role": "user", "content": message})
+            
+            # Make sure the most recent user message is included
+            if not conversation_history or messages[-1]["role"] != "user" or messages[-1]["content"] != message:
+                messages.append({"role": "user", "content": message})
+            
+            # Log the conversation context being sent
+            print(f"Sending conversation with {len(messages)} messages")
+            
             completion = client.chat.completions.create(
                 model=MODEL_NAME,
-                messages=[
-                    {"role": "system", "content": system_message},
-                    {"role": "user", "content": message}
-                ],
+                messages=messages,
                 temperature=0.7,
                 tools=tools,
                 tool_choice="auto"
@@ -122,14 +147,13 @@ async def process_chat_message(message: str, user_id: int, db) -> Tuple[str, Opt
                     })
                     
                     # Get a user-friendly response with a follow-up call
+                    clarification_messages = messages.copy()
+                    clarification_messages.append({"role": "assistant", "content": "I've identified a todo item in your message."})
+                    clarification_messages.append({"role": "user", "content": "Can you acknowledge this todo item in a natural, conversational way? Only ask if I want to add it when that's clearly appropriate based on context."})
+                    
                     clarification_completion = client.chat.completions.create(
                         model=MODEL_NAME,
-                        messages=[
-                            {"role": "system", "content": system_message},
-                            {"role": "user", "content": message},
-                            {"role": "assistant", "content": "I've identified a todo item in your message."},
-                            {"role": "user", "content": "Can you describe this todo item in a user-friendly way and ask me if I want to add it to my todo list?"}
-                        ],
+                        messages=clarification_messages,
                         temperature=0.7
                     )
                     
@@ -143,14 +167,13 @@ async def process_chat_message(message: str, user_id: int, db) -> Tuple[str, Opt
                     })
                     
                     # Get a user-friendly response with a follow-up call
+                    clarification_messages = messages.copy()
+                    clarification_messages.append({"role": "assistant", "content": "I've identified a calendar event in your message."})
+                    clarification_messages.append({"role": "user", "content": "Can you acknowledge this event in a natural, conversational way? Only ask if I want to add it when that's clearly appropriate based on context."})
+                    
                     clarification_completion = client.chat.completions.create(
                         model=MODEL_NAME,
-                        messages=[
-                            {"role": "system", "content": system_message},
-                            {"role": "user", "content": message},
-                            {"role": "assistant", "content": "I've identified a calendar event in your message."},
-                            {"role": "user", "content": "Can you describe this event in a user-friendly way and ask me if I want to add it to my calendar?"}
-                        ],
+                        messages=clarification_messages,
                         temperature=0.7
                     )
                     
