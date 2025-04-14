@@ -2,7 +2,6 @@ import json
 import together
 from typing import Tuple, List, Dict, Any, Optional
 from datetime import datetime, timedelta
-import traceback
 
 from utils.config import settings
 
@@ -26,7 +25,7 @@ async def process_chat_message(message: str, user_id: int, db) -> Tuple[str, Opt
             return "I'm sorry, the AI service is not properly configured. Please contact the administrator.", None
         else:
             masked_key = api_key[:4] + "..." + api_key[-4:] if len(api_key) > 8 else "***"
-            print(f"Using Together API key: {masked_key}, length: {len(api_key)}")
+            print(f"Using Together API key: {masked_key}")
         
         # Create the system message with instructions
         system_message = """
@@ -40,14 +39,8 @@ async def process_chat_message(message: str, user_id: int, db) -> Tuple[str, Opt
         Respond conversationally and be helpful.
         """
         
-        # Create Together client with detailed debugging
-        print(f"Creating Together client with key of length {len(api_key)}")
-        try:
-            client = together.Together(api_key=api_key)
-            print("Together client created successfully")
-        except Exception as e:
-            print(f"Error creating Together client: {str(e)}")
-            return f"Error initializing AI service: {str(e)}", None
+        # Create Together client
+        client = together.Together(api_key=api_key)
         
         # Set up tools for function calling
         tools = [
@@ -89,28 +82,12 @@ async def process_chat_message(message: str, user_id: int, db) -> Tuple[str, Opt
             }
         ]
         
-        # Make the API call using the SDK with detailed error handling
+        # Make the API call using the SDK
         try:
-            print(f"Sending request to Together AI with message: '{message[:50]}...'")
+            print(f"Sending request to Together AI...")
             
-            # First try a simple text completion to verify API key works
-            try:
-                test_completion = client.chat.completions.create(
-                    model="meta-llama/Llama-3.1-8B-Instruct",
-                    messages=[
-                        {"role": "user", "content": "Test message"}
-                    ],
-                    max_tokens=5
-                )
-                print("API key test successful")
-            except Exception as e:
-                print(f"API key test failed: {str(e)}")
-                print(traceback.format_exc())
-                return f"Error testing API connection: {str(e)}", None
-            
-            # Now try the full completion with tools
             completion = client.chat.completions.create(
-                model="meta-llama/Llama-3.1-8B-Instruct",
+                model="meta-llama/Llama-3.1-8B-Instruct-Turbo",
                 messages=[
                     {"role": "system", "content": system_message},
                     {"role": "user", "content": message}
@@ -144,7 +121,7 @@ async def process_chat_message(message: str, user_id: int, db) -> Tuple[str, Opt
                     
                     # Get a user-friendly response with a follow-up call
                     clarification_completion = client.chat.completions.create(
-                        model="meta-llama/Llama-3.1-8B-Instruct",
+                        model="meta-llama/Llama-3.1-8B-Instruct-Turbo",
                         messages=[
                             {"role": "system", "content": system_message},
                             {"role": "user", "content": message},
@@ -165,7 +142,7 @@ async def process_chat_message(message: str, user_id: int, db) -> Tuple[str, Opt
                     
                     # Get a user-friendly response with a follow-up call
                     clarification_completion = client.chat.completions.create(
-                        model="meta-llama/Llama-3.1-8B-Instruct",
+                        model="meta-llama/Llama-3.1-8B-Instruct-Turbo",
                         messages=[
                             {"role": "system", "content": system_message},
                             {"role": "user", "content": message},
@@ -180,16 +157,13 @@ async def process_chat_message(message: str, user_id: int, db) -> Tuple[str, Opt
                     bot_response = response_message.content or "I've processed your request but couldn't generate a proper response."
             else:
                 bot_response = response_message.content or "I couldn't understand your request. Please try rephrasing."
-            
-            return bot_response, generated_items if generated_items else None
-            
         except Exception as e:
-            print(f"Together API request error: {str(e)}")
-            print(traceback.format_exc())
+            print(f"API request error: {str(e)}")
             # Provide a simple response if API call failed
             return f"I'm having trouble connecting to the AI service. Error: {str(e)}", None
+        
+        return bot_response, generated_items if generated_items else None
     
     except Exception as e:
         print(f"Error processing chat message: {str(e)}")
-        print(traceback.format_exc())
         return f"I'm sorry, I encountered an error: {str(e)}", None 

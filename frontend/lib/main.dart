@@ -2297,20 +2297,6 @@ class _ChatScreenState extends State<ChatScreen> {
       _messageController.clear();
       
       try {
-        // Check if user is logged in
-        final isLoggedIn = await ApiService.isLoggedIn();
-        if (!isLoggedIn) {
-          setState(() {
-            _messages.add({
-              'text': 'You need to log in to use the chat feature',
-              'isUser': false,
-              'time': time,
-              'isError': true,
-            });
-          });
-          return;
-        }
-        
         // Display typing indicator
         setState(() {
           _messages.add({
@@ -2321,49 +2307,12 @@ class _ChatScreenState extends State<ChatScreen> {
           });
         });
         
-        // Test authentication with backend
-        final authOk = await ApiService.testAuth();
-        if (!authOk) {
-          setState(() {
-            _messages.removeWhere((message) => message['isTyping'] == true);
-            _messages.add({
-              'text': 'Authentication failed. Please log in again.',
-              'isUser': false,
-              'time': time,
-              'isError': true,
-            });
-          });
-          return;
-        }
-        
         // Send message to API
         final response = await ApiService.sendChatMessage(userMessage);
         
         // Remove typing indicator and add actual response
         setState(() {
           _messages.removeWhere((message) => message['isTyping'] == true);
-        });
-        
-        // Check if there was an error
-        if (response.containsKey('error')) {
-          setState(() {
-            _messages.add({
-              'text': response['response'],
-              'isUser': false,
-              'time': time,
-              'isError': true,
-            });
-          });
-          
-          // Show auth error dialog if needed
-          if (response['error'] == 'Authentication failed') {
-            _showAuthErrorDialog();
-          }
-          return;
-        }
-        
-        // Handle successful response
-        setState(() {
           _messages.add({
             'text': response['response'],
             'isUser': false,
@@ -2381,9 +2330,7 @@ class _ChatScreenState extends State<ChatScreen> {
         String errorMessage = 'Sorry, I encountered an error';
         
         if (error.toString().contains('401')) {
-          errorMessage += ': Authentication failed. Please log in again.';
-          // Show auth error dialog
-          _showAuthErrorDialog();
+          errorMessage += ': API authentication failed. Please check API key configuration.';
         } else if (error.toString().contains('Failed to send message')) {
           errorMessage += ': Could not connect to the AI service. Please check your internet connection or try again later.';
         } else {
@@ -2396,7 +2343,6 @@ class _ChatScreenState extends State<ChatScreen> {
             'text': errorMessage,
             'isUser': false,
             'time': time,
-            'isError': true,
           });
         });
         
@@ -2417,22 +2363,6 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
   
-  void _showAuthErrorDialog() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Authentication Error'),
-        content: const Text('Your session has expired. Please log in again to continue using the chat.'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('OK'),
-          ),
-        ],
-      ),
-    );
-  }
-  
   void _retryLastMessage() {
     // Find the last user message
     final lastUserMessage = _messages.lastWhere(
@@ -2446,7 +2376,7 @@ class _ChatScreenState extends State<ChatScreen> {
       _sendMessage();
     }
   }
-
+  
   void _handleGeneratedItems(List<dynamic> items) {
     for (var item in items) {
       if (item['type'] == 'todo') {
@@ -2563,8 +2493,6 @@ class _ChatScreenState extends State<ChatScreen> {
 
   Widget _buildMessageBubble(String text, bool isUser, String time) {
     final colorScheme = Theme.of(context).colorScheme;
-    final isError = _messages.any((m) => 
-      m['text'] == text && m['isUser'] == isUser && m['time'] == time && m['isError'] == true);
     
     return Align(
       alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
@@ -2574,9 +2502,7 @@ class _ChatScreenState extends State<ChatScreen> {
         decoration: BoxDecoration(
           color: isUser 
               ? colorScheme.primary
-              : isError 
-                  ? Colors.red.shade100
-                  : colorScheme.secondaryContainer,
+              : colorScheme.secondaryContainer,
           borderRadius: BorderRadius.circular(16),
         ),
         constraints: BoxConstraints(
@@ -2590,20 +2516,14 @@ class _ChatScreenState extends State<ChatScreen> {
               style: TextStyle(
                 color: isUser 
                     ? colorScheme.onPrimary
-                    : isError
-                        ? Colors.red.shade900
-                        : colorScheme.onSecondary,
+                    : colorScheme.onSecondary,
               ),
             ),
             const SizedBox(height: 4),
             Text(
               time,
               style: TextStyle(
-                color: (isUser 
-                    ? colorScheme.onPrimary 
-                    : isError
-                        ? Colors.red.shade900
-                        : colorScheme.onSecondary)
+                color: (isUser ? colorScheme.onPrimary : colorScheme.onSecondary)
                     .withOpacity(0.6),
                 fontSize: 12,
               ),

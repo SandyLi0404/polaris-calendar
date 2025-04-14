@@ -1,12 +1,10 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Request
-from fastapi.security import OAuth2PasswordBearer
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from pydantic import BaseModel
 from datetime import datetime, timedelta
 import tempfile
 import os
-import traceback
 
 from utils.database import get_db
 from utils.auth import get_current_active_user
@@ -50,61 +48,27 @@ class ConfirmationRequest(BaseModel):
     class Config:
         from_attributes = True
 
-# Debugging endpoint to check API key
-@router.get("/debug", response_model=dict)
-async def debug_together_api():
-    try:
-        api_key = settings.TOGETHER_API_KEY
-        masked_key = api_key[:4] + "..." + api_key[-4:] if len(api_key) > 8 else "***"
-        return {
-            "message": "Debug information",
-            "api_key_set": bool(api_key),
-            "api_key_masked": masked_key,
-            "api_key_length": len(api_key)
-        }
-    except Exception as e:
-        return {
-            "message": "Error in debug endpoint",
-            "error": str(e)
-        }
-
 @router.post("/chat/text", response_model=ChatResponse)
 async def chat_text(
-    request: Request,
     chat_request: ChatRequest,
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    try:
-        # Log headers for debugging
-        print("Request headers:", dict(request.headers))
-        print(f"User authenticated: {current_user.username}")
-        
-        # Check Together API key
-        if not settings.TOGETHER_API_KEY:
-            print("ERROR: Together API key is not configured")
-            raise HTTPException(status_code=500, detail="Together API key is not configured")
-        
-        # Log API key for debugging (masked)
-        api_key = settings.TOGETHER_API_KEY
-        masked_key = api_key[:4] + "..." + api_key[-4:] if len(api_key) > 8 else "***"
-        print(f"Using Together API key: {masked_key}, length: {len(api_key)}")
-        
-        # Process message using Together AI
-        response, generated_items = await process_chat_message(
-            chat_request.message, 
-            current_user.id,
-            db
-        )
-        
-        return {
-            "response": response,
-            "generated_items": generated_items
-        }
-    except Exception as e:
-        print(f"ERROR in chat_text: {str(e)}")
-        print(traceback.format_exc())
-        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+    
+    if not settings.TOGETHER_API_KEY:
+        raise HTTPException(status_code=500, detail="Together API key is not configured")
+    
+    # Process message using Together AI
+    response, generated_items = await process_chat_message(
+        chat_request.message, 
+        current_user.id,
+        db
+    )
+    
+    return {
+        "response": response,
+        "generated_items": generated_items
+    }
 
 @router.post("/confirm-item", response_model=dict)
 async def confirm_item(
